@@ -3,14 +3,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Cloud DB config (for pushing metrics)
+
 CLOUD_DB_CONFIG = {
     "host": os.getenv("CLOUD_DB_HOST"),
     "user": os.getenv("CLOUD_DB_USER"),
     "password": os.getenv("CLOUD_DB_PASSWORD"),
     "database": os.getenv("CLOUD_DB_NAME"),
     "port": int(os.getenv("CLOUD_DB_PORT", 3306)),
-    "cursorclass": None  # Set later in main using pymysql.cursors.DictCursor
+    "cursorclass": None  
 }
 
 def load_projects():
@@ -31,7 +31,7 @@ def load_projects():
         db_port = int(os.getenv(f"{prefix}DB_PORT", 3306))
 
         if not (name and db_name and db_host and db_user and db_password and tables):
-            continue  # skip incomplete project config
+            continue 
 
         project_config = {
             "project_name": name,
@@ -42,7 +42,7 @@ def load_projects():
                 "password": db_password,
                 "database": db_name,
                 "port": db_port,
-                "cursorclass": None  # Set later when connecting
+                "cursorclass": None  
             }
         }
 
