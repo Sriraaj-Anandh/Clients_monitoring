@@ -1,4 +1,6 @@
 import pymysql
+import psycopg2
+import psycopg2.extras
 import hashlib
 import time
 from datetime import datetime
@@ -6,11 +8,12 @@ from collections import defaultdict
 
 from config import CLOUD_DB_CONFIG, load_projects
 
-# Load projects and build project mapping
+# Load project metadata
 PROJECTS = {}
 for proj in load_projects():
     project_name = proj["project_name"]
     PROJECTS[project_name] = {
+        "db_type": proj.get("db_type", "mysql"),  # default to MySQL
         "db_name": proj["db_config"]["database"],
         "tables": proj["tables"],
         "db_host": proj["db_config"]["host"],
@@ -19,7 +22,7 @@ for proj in load_projects():
         "db_port": proj["db_config"]["port"]
     }
 
-# Fingerprint tracking
+# Track table fingerprints
 fingerprints = {}
 
 def compute_fingerprint(rows):
@@ -29,9 +32,32 @@ def compute_fingerprint(rows):
             hasher.update(str(value).encode())
     return hasher.hexdigest()
 
-def fetch_rows(cursor, table):
-    cursor.execute(f"SELECT * FROM {table}")
+def fetch_rows(cursor, table, db_type):
+    if db_type == "postgres":
+        cursor.execute(f'SELECT * FROM "{table}"')
+    else:
+        cursor.execute(f"SELECT * FROM {table}")
     return cursor.fetchall()
+
+def get_local_connection(project_data):
+    if project_data['db_type'] == "postgres":
+        return psycopg2.connect(
+            host=project_data['db_host'],
+            user=project_data['db_user'],
+            password=project_data['db_password'],
+            dbname=project_data['db_name'],
+            port=project_data['db_port'],
+            cursor_factory=psycopg2.extras.RealDictCursor
+        )
+    else:  # MySQL
+        return pymysql.connect(
+            host=project_data['db_host'],
+            user=project_data['db_user'],
+            password=project_data['db_password'],
+            database=project_data['db_name'],
+            port=project_data['db_port'],
+            cursorclass=pymysql.cursors.DictCursor
+        )
 
 def monitor_tables():
     cloud_conn = pymysql.connect(
@@ -47,22 +73,16 @@ def monitor_tables():
                 top_user_map = defaultdict(int)
                 table_update_data = []
 
-                local_project_conn = pymysql.connect(
-                    host=project_data['db_host'],
-                    user=project_data['db_user'],
-                    password=project_data['db_password'],
-                    database=project_data['db_name'],
-                    port=project_data['db_port'],
-                    cursorclass=pymysql.cursors.DictCursor
-                )
+                local_conn = get_local_connection(project_data)
 
-                with local_project_conn.cursor() as cursor:
+                with local_conn.cursor() as cursor:
                     for table in project_data['tables']:
-                        rows = fetch_rows(cursor, table)
+                        rows = fetch_rows(cursor, table, project_data['db_type'])
                         fingerprint = compute_fingerprint(rows)
 
-                        if fingerprints.get(f"{project_name}_{table}") != fingerprint:
-                            fingerprints[f"{project_name}_{table}"] = fingerprint
+                        key = f"{project_name}_{table}"
+                        if fingerprints.get(key) != fingerprint:
+                            fingerprints[key] = fingerprint
                             update_count = len(rows)
                             total_update_count += update_count
 
@@ -90,7 +110,7 @@ def monitor_tables():
                                 "month": now.month
                             })
 
-                local_project_conn.close()
+                local_conn.close()
 
                 if table_update_data:
                     total_users = len(top_user_map)
@@ -132,8 +152,7 @@ def monitor_tables():
                                     day,
                                     weekday,
                                     month
-                                )
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             """, (
                                 project_name,
                                 data["table_name"],

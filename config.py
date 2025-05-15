@@ -29,23 +29,26 @@ def load_projects():
         db_user = os.getenv(f"{prefix}DB_USER")
         db_password = os.getenv(f"{prefix}DB_PASSWORD")
         db_port = int(os.getenv(f"{prefix}DB_PORT", 3306))
+        db_type = os.getenv(f"{prefix}DB_TYPE", "mysql").lower()
 
         if not (name and db_name and db_host and db_user and db_password and tables):
-            continue 
+            continue  # skip incomplete project config
 
         project_config = {
             "project_name": name,
             "tables": [t.strip() for t in tables if t.strip()],
+            "db_type": db_type,
             "db_config": {
                 "host": db_host,
                 "user": db_user,
                 "password": db_password,
                 "database": db_name,
                 "port": db_port,
-                "cursorclass": None  
+                "cursorclass": None  # Will be set later
             }
         }
 
         projects.append(project_config)
 
     return projects
+
