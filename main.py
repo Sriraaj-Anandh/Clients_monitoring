@@ -22,6 +22,11 @@ for proj in load_projects():
         "db_port": proj["db_config"]["port"]
     }
 
+# Debug: Print loaded projects
+print("✅ Loaded Projects:")
+for name, config in PROJECTS.items():
+    print(f" - {name}: {config['db_type']} | Tables: {config['tables']}")
+
 # Track table fingerprints
 fingerprints = {}
 
@@ -33,11 +38,15 @@ def compute_fingerprint(rows):
     return hasher.hexdigest()
 
 def fetch_rows(cursor, table, db_type):
-    if db_type == "postgres":
-        cursor.execute(f'SELECT * FROM "{table}"')
-    else:
-        cursor.execute(f"SELECT * FROM {table}")
-    return cursor.fetchall()
+    try:
+        if db_type == "postgres":
+            cursor.execute(f'SELECT * FROM "{table}"')
+        else:
+            cursor.execute(f"SELECT * FROM {table}")
+        return cursor.fetchall()
+    except Exception as e:
+        print(f"⚠️ Failed to fetch rows from table '{table}': {e}")
+        return []
 
 def get_local_connection(project_data):
     if project_data['db_type'] == "postgres":
@@ -69,19 +78,28 @@ def monitor_tables():
             now = datetime.utcnow()
 
             for project_name, project_data in PROJECTS.items():
+                print(f"\n🔄 Checking project: {project_name}")
+
                 total_update_count = 0
                 top_user_map = defaultdict(int)
                 table_update_data = []
 
-                local_conn = get_local_connection(project_data)
+                try:
+                    local_conn = get_local_connection(project_data)
+                except Exception as e:
+                    print(f"❌ Could not connect to {project_name}: {e}")
+                    continue
 
                 with local_conn.cursor() as cursor:
                     for table in project_data['tables']:
                         rows = fetch_rows(cursor, table, project_data['db_type'])
-                        fingerprint = compute_fingerprint(rows)
+                        print(f"   ↳ {table}: {len(rows)} rows fetched")
 
+                        fingerprint = compute_fingerprint(rows)
                         key = f"{project_name}_{table}"
+
                         if fingerprints.get(key) != fingerprint:
+                            print(f"   ✅ Detected update in table: {table}")
                             fingerprints[key] = fingerprint
                             update_count = len(rows)
                             total_update_count += update_count
@@ -109,6 +127,8 @@ def monitor_tables():
                                 "weekday": now.weekday(),
                                 "month": now.month
                             })
+                        else:
+                            print(f"   ⏸️ No change detected in {table}")
 
                 local_conn.close()
 
@@ -137,6 +157,7 @@ def monitor_tables():
                                 month INT
                             );
                         """)
+                        print(f"📦 Inserting data into cloud table: {cloud_table_name}")
 
                         for data in table_update_data:
                             cloud_cursor.execute(f"""
@@ -166,9 +187,13 @@ def monitor_tables():
                                 data["weekday"],
                                 data["month"]
                             ))
+                            print(f"   ✅ Inserted: {data['table_name']} with {data['update_count']} updates")
 
                     cloud_conn.commit()
+                else:
+                    print(f"ℹ️ No new updates to insert for {project_name}")
 
+            print("🕒 Sleeping for 30 seconds...\n")
             time.sleep(30)
 
     finally:
